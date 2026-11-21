@@ -217,7 +217,7 @@ function enterMain() {
     S.members = s.val() || {};
     S.partner = Object.keys(S.members).find(k => k !== S.uid) || null;
     if (S.members[S.uid]) { S.name = S.members[S.uid].name; LS.set('nd_name', S.name); }
-    renderHeader(); schedule('mood', renderMoods); schedule('msgs', renderMessages); renderNotes(); updateQuizMeta();
+    renderHeader(); schedule('mood', renderMoods); schedule('msgs', renderMessages); schedule('places', renderPlaces); renderNotes(); updateQuizMeta();
   });
   on('meta/since', 'value', s => { S.since = s.val(); renderIsland(); });
   const mq = q => q.orderByKey().limitToLast(200);
@@ -322,9 +322,47 @@ const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\u200d|\ufe0f|\s)+$/u;
 const CHK1 = '<svg viewBox="0 0 18 12"><path d="M4 6.5l3.5 3.5L14 2.5"/></svg>';
 const CHK2 = '<svg viewBox="0 0 18 12"><path d="M1 6.5L4.5 10 11 2.5M7 8.8L8.2 10 15 2.5"/></svg>';
 
+function photoOf(u) { return (u && S.members[u] && S.members[u].photo) || ''; }
+function setAvatar(el, u) {
+  const ph = photoOf(u);
+  el.classList.toggle('ph', !!ph); el.style.backgroundImage = ph ? 'url(' + ph + ')' : '';
+  el.textContent = ph ? '' : (u ? initial(nameOf(u)) : '💜');
+}
+function avHtml(u, cls) {
+  const ph = photoOf(u);
+  return '<div class="' + cls + (ph ? ' ph' : '') + '"' + (ph ? ' style="background-image:url(' + ph + ')"' : '') + '>' + (ph ? '' : esc(initial(nameOf(u)))) + '</div>';
+}
+function squareCompress(file, size, q) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => {
+      const w = im.naturalWidth, h = im.naturalHeight, s = Math.min(w, h);
+      const c = document.createElement('canvas'); c.width = size; c.height = size;
+      const x = c.getContext('2d'); x.fillStyle = '#000'; x.fillRect(0, 0, size, size);
+      x.drawImage(im, (w - s) / 2, (h - s) / 2, s, s, 0, 0, size, size);
+      URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg', q));
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('img')); };
+    im.src = url;
+  });
+}
+function profileSheet() {
+  const mine = !!photoOf(S.uid), pa = S.partner;
+  const sh = openSheet('<h3>Foto de perfil</h3><p class="sub">Toque na sua foto para trocar.</p><div class="prof-row">' +
+    '<button class="prof" data-a="pick" type="button"><span class="av-wrap">' + avHtml(S.uid, 'avatar big') + '<i class="cam"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg></i></span><b>Você</b><small>' + esc(S.name) + '</small></button>' +
+    (pa ? '<button class="prof" data-a="view" type="button"><span class="av-wrap">' + avHtml(pa, 'avatar big') + '</span><b>' + esc(nameOf(pa)) + '</b><small>' + (photoOf(pa) ? 'Toque para ampliar' : 'Sem foto ainda') + '</small></button>' : '') +
+    '</div><button class="btn primary" data-a="pick" type="button">' + (mine ? 'Trocar minha foto' : 'Escolher minha foto') + '</button>' +
+    (mine ? '<div style="height:10px"></div><button class="btn ghost" data-a="rem" type="button">Remover minha foto</button>' : ''));
+  sh.addEventListener('click', e => {
+    const b = e.target.closest('[data-a]'); if (!b) return; const a = b.dataset.a;
+    if (a === 'pick') $('#avIn').click();
+    if (a === 'rem') { R('members/' + S.uid + '/photo').remove(); closeSheet(); toast('Foto removida'); }
+    if (a === 'view' && photoOf(pa)) { closeSheet(); openViewer(photoOf(pa)); }
+  });
+}
 function renderHeader() {
-  const n = S.partner ? nameOf(S.partner) : 'Conversa';
-  $('#chName').textContent = n; $('#chAvatar').textContent = S.partner ? initial(n) : '💜';
+  $('#chName').textContent = S.partner ? nameOf(S.partner) : 'Conversa';
+  setAvatar($('#chAvatar'), S.partner);
   updateSub();
 }
 function updateSub() {
@@ -495,8 +533,8 @@ function renderMoodGrid() {
 function lastMood(u) { let b = null; for (const id in S.moods) { const m = S.moods[id]; if (m.u === u && (!b || m.ts > b.ts)) b = m; } return b; }
 function moodCard(u, who) {
   const m = u ? lastMood(u) : null;
-  if (!m) return '<div class="who">' + esc(who) + '</div><div class="em">🫥</div><div class="lb">Sem status</div><div class="tx">ainda não contou</div>';
-  return '<div class="who">' + esc(who) + '</div><div class="em">' + esc(m.e) + '</div><div class="lb">' + esc(m.l) + '</div>' + (m.t ? '<div class="tx">' + esc(m.t) + '</div>' : '') + '<div class="ag">' + ago(m.ts) + '</div>';
+  if (!m) return avHtml(u, 'mini-av') + '<div class="who">' + esc(who) + '</div><div class="em">🫥</div><div class="lb">Sem status</div><div class="tx">ainda não contou</div>';
+  return avHtml(u, 'mini-av') + '<div class="who">' + esc(who) + '</div><div class="em">' + esc(m.e) + '</div><div class="lb">' + esc(m.l) + '</div>' + (m.t ? '<div class="tx">' + esc(m.t) + '</div>' : '') + '<div class="ag">' + ago(m.ts) + '</div>';
 }
 function renderMoods() {
   const them = S.partner ? lastMood(S.partner) : null, me = lastMood(S.uid);
@@ -509,54 +547,118 @@ function renderMoods() {
 }
 
 /* ================= mapa ================= */
-function ensureMap() {
-  if (S.map || !window.L) return;
+function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('load')); document.head.appendChild(s); }); }
+function loadCss(href) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; document.head.appendChild(l); }
+let leafletLoading = null;
+function needLeaflet() {
+  if (window.L) return Promise.resolve();
+  if (leafletLoading) return leafletLoading;
+  leafletLoading = (async () => {
+    const srcs = ['https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js', 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js'];
+    for (let i = 0; i < srcs.length && !window.L; i++) {
+      try { await loadScript(srcs[i]); loadCss(srcs[i].replace('leaflet.js', 'leaflet.css')); } catch (e) {}
+    }
+    leafletLoading = null;
+    if (!window.L) throw new Error('leaflet');
+  })();
+  return leafletLoading;
+}
+async function ensureMap() {
+  if (S.map || S.mapBusy) return;
+  S.mapBusy = true;
+  const msg = $('#mapMsg');
+  try {
+    if (!window.L) { msg.innerHTML = 'Carregando mapa…'; msg.classList.add('show'); await needLeaflet(); }
+    buildMap(); msg.classList.remove('show');
+  } catch (e) {
+    msg.innerHTML = 'Não consegui carregar o mapa.<br>Verifique a internet e tente de novo.<br><button class="btn primary" id="mapRetry" type="button">Tentar de novo</button>';
+    msg.classList.add('show');
+  }
+  S.mapBusy = false;
+}
+function addTiles(m) {
+  let errs = 0, swapped = false;
+  const dark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, attribution: '© OpenStreetMap · © CARTO' }).addTo(m);
+  dark.on('tileerror', () => {
+    if (swapped) return;
+    if (++errs >= 4) {
+      swapped = true; m.removeLayer(dark);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
+      $('#map').classList.add('osm');
+    }
+  });
+}
+function buildMap() {
   const m = L.map('map', { zoomControl: false, worldCopyJump: true }).setView([-14.2, -51.9], 4);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, attribution: '© OpenStreetMap · © CARTO' }).addTo(m);
+  addTiles(m);
   m.attributionControl.setPrefix(false);
   S.map = m; S.layerG = L.layerGroup().addTo(m);
-  m.on('click', e => { closeMapRes(); pickPoint(e.latlng.lat, e.latlng.lng, '', true); });
+  m.on('click', e => { closeMapRes(); pickPoint(e.latlng.lat, e.latlng.lng, '', true, ''); });
   renderPlaces();
+  setTimeout(() => m.invalidateSize(), 150);
   setTimeout(() => $('#mapHint').classList.add('hide'), 6000);
 }
-function pinIcon(cls) { return L.divIcon({ className: 'pinwrap', html: '<div class="pin ' + cls + '"></div>', iconSize: [34, 34], iconAnchor: [9, 40], popupAnchor: [8, -38] }); }
+function pinIcon(cls) { return L.divIcon({ className: 'pinwrap', html: '<div class="pin ' + cls + '"></div>', iconSize: [34, 34], iconAnchor: [17, 41], popupAnchor: [0, -44], tooltipAnchor: [0, 0] }); }
+const shortDate = ts => new Date(ts).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' às ' + fmtTime(ts);
+function popupHtml(id, p, mine) {
+  const who = mine ? 'você' : nameOf(p.u);
+  const where = p.addr || (Number(p.lat).toFixed(4) + ', ' + Number(p.lng).toFixed(4));
+  return '<div class="pop-t">' + esc(p.name) + '</div><div class="pop-m"><div>👤 Marcado por <b>' + esc(who) + '</b></div><div>🕒 ' + esc(fmtFull(p.ts)) + '</div><div>📍 ' + esc(where) + '</div></div>' + (mine ? '<button class="pop-del" data-del="' + id + '" type="button">Remover este lugar</button>' : '');
+}
 function renderPlaces() {
-  if (!S.map) return;
+  if (!S.map || !window.L) return;
   S.layerG.clearLayers(); S.markers = {};
   const ids = Object.keys(S.places);
   ids.forEach(id => {
-    const p = S.places[id]; const mine = p.u === S.uid;
+    const p = S.places[id]; const mine = p.u === S.uid; const who = mine ? 'Você' : nameOf(p.u);
     const mk = L.marker([p.lat, p.lng], { icon: pinIcon(mine ? 'mine' : 'theirs') }).addTo(S.layerG);
-    mk.bindPopup('<div class="pop-t">' + esc(p.name) + '</div><div class="pop-m">Marcado por <b>' + esc(p.u === S.uid ? 'você' : nameOf(p.u)) + '</b><br>' + esc(fmtFull(p.ts)) + '</div>' + (mine ? '<button class="pop-del" data-del="' + id + '" type="button">Remover este lugar</button>' : ''), { className: 'dpop', closeButton: false, autoPanPadding: [30, 120] });
+    mk.bindTooltip('<b>' + esc(p.name) + '</b><span>' + esc(who) + ' · ' + esc(shortDate(p.ts)) + '</span>', { permanent: true, direction: 'bottom', offset: [0, 4], className: 'dtip' });
+    mk.bindPopup(popupHtml(id, p, mine), { className: 'dpop', closeButton: false, autoPanPadding: [30, 120] });
     S.markers[id] = mk;
   });
   if (!S.mapFit) {
     S.mapFit = true;
-    if (ids.length) { const b = L.latLngBounds(ids.map(i => [S.places[i].lat, S.places[i].lng])); S.map.fitBounds(b, { padding: [60, 60], maxZoom: 15 }); }
+    if (ids.length) { const b = L.latLngBounds(ids.map(i => [S.places[i].lat, S.places[i].lng])); S.map.fitBounds(b, { padding: [70, 70], maxZoom: 15 }); }
   }
 }
-function pickPoint(lat, lng, name, reverse) {
+async function reverseInfo(lat, lng) {
+  try {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 4500);
+    const r = await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=pt-BR&lat=' + lat + '&lon=' + lng, { signal: ctl.signal });
+    clearTimeout(t);
+    const j = await r.json(); if (!j) return { name: '', addr: '' };
+    const a = j.address || {};
+    const road = [a.road || a.pedestrian || a.footway || '', a.house_number || ''].filter(Boolean).join(', ');
+    const city = a.city || a.town || a.village || a.municipality || '';
+    const addr = [road, a.suburb || a.neighbourhood || '', city, a.state || ''].filter(Boolean).join(', ') || (j.display_name || '').split(',').slice(0, 4).join(',').trim();
+    return { name: j.name || road || '', addr: addr };
+  } catch (e) { return { name: '', addr: '' }; }
+}
+function pickPoint(lat, lng, name, reverse, addrIn) {
   if (S.temp) { S.map.removeLayer(S.temp); S.temp = null; }
   S.temp = L.marker([lat, lng], { icon: pinIcon('temp'), interactive: false }).addTo(S.map);
-  openSheet('<h3>Marcar nosso date</h3><p class="sub">Dê um nome para esse lugar.</p><input class="field" id="plName" maxlength="60" placeholder="Ex.: Pizzaria do centro" value="' + esc(name || '') + '"><div class="row"><button class="btn ghost" id="plCancel" type="button">Cancelar</button><button class="btn primary" id="plSave" type="button">Marcar</button></div>', {
+  let addr = addrIn || '';
+  openSheet('<h3>Marcar nosso date</h3><p class="sub">Dê um nome para esse lugar.</p><input class="field" id="plName" maxlength="60" placeholder="Ex.: Pizzaria do centro" value="' + esc(name || '') + '"><div class="addr" id="plAddr">📍 ' + (addr ? esc(addr) : (reverse ? 'Buscando o endereço…' : 'Endereço não encontrado')) + '</div><div class="row"><button class="btn ghost" id="plCancel" type="button">Cancelar</button><button class="btn primary" id="plSave" type="button">Marcar</button></div>', {
     onClose: () => { if (S.temp && S.map) { S.map.removeLayer(S.temp); S.temp = null; } },
     onOpen: sh => {
       const inp = $('#plName', sh); let typed = false; inp.addEventListener('input', () => { typed = true; });
-      if (reverse) reverseName(lat, lng).then(n => { if (n && !typed && inp.isConnected) inp.value = n; });
+      if (reverse) reverseInfo(lat, lng).then(r => {
+        if (!inp.isConnected) return;
+        if (r.name && !typed) inp.value = r.name;
+        if (r.addr) { addr = r.addr; $('#plAddr', sh).textContent = '📍 ' + r.addr; } else $('#plAddr', sh).textContent = '📍 Endereço não encontrado';
+      });
       $('#plCancel', sh).onclick = () => closeSheet();
       $('#plSave', sh).onclick = async () => {
         const nm = inp.value.trim(); if (!nm) { inp.focus(); return; }
-        try { await R('places').push({ name: nm, lat: +lat.toFixed(6), lng: +lng.toFixed(6), u: S.uid, ts: now() }); closeSheet(); toast('Date marcado 💜'); } catch (e) { toast('Não foi possível marcar'); }
+        const b = $('#plSave', sh); b.disabled = true;
+        try {
+          if (!addr && reverse) addr = (await reverseInfo(lat, lng)).addr;
+          const data = { name: nm, lat: +lat.toFixed(6), lng: +lng.toFixed(6), u: S.uid, ts: now() }; if (addr) data.addr = addr;
+          await R('places').push(data); closeSheet(); toast('Date marcado 💜');
+        } catch (e) { toast('Não foi possível marcar'); b.disabled = false; }
       };
     }
   });
-}
-async function reverseName(lat, lng) {
-  try {
-    const r = await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=pt-BR&lat=' + lat + '&lon=' + lng);
-    const j = await r.json(); if (!j) return '';
-    return j.name || (j.display_name ? j.display_name.split(',')[0] : '');
-  } catch (e) { return ''; }
 }
 function closeMapRes() { const r = $('#mapRes'); if (r) r.classList.remove('open'); }
 async function searchPlaces() {
@@ -572,16 +674,19 @@ async function searchPlaces() {
 }
 function locateMe() {
   if (!navigator.geolocation) return toast('Localização indisponível');
-  navigator.geolocation.getCurrentPosition(p => { ensureMap(); if (S.map) S.map.flyTo([p.coords.latitude, p.coords.longitude], 16, { duration: 1.4 }); }, () => toast('Permita a localização para usar'), { enableHighAccuracy: true, timeout: 10000 });
+  toast('Buscando sua localização…');
+  navigator.geolocation.getCurrentPosition(async p => { await ensureMap(); if (S.map) S.map.flyTo([p.coords.latitude, p.coords.longitude], 16, { duration: 1.4 }); }, () => toast('Permita a localização para usar'), { enableHighAccuracy: true, timeout: 10000 });
 }
 function placesList() {
   const ids = Object.keys(S.places).sort((a, b) => S.places[b].ts - S.places[a].ts);
-  const html = ids.length ? '<div class="pl-list">' + ids.map(id => { const p = S.places[id]; return '<button type="button" data-id="' + id + '"><span style="font-size:24px">📍</span><span><b>' + esc(p.name) + '</b><small>' + esc(p.u === S.uid ? 'você' : nameOf(p.u)) + ' · ' + esc(fmtFull(p.ts)) + '</small></span></button>'; }).join('') + '</div>' : '<div class="empty" style="margin:20px 0">Nenhum date marcado ainda.<br>Toque no mapa para marcar o primeiro 💜</div>';
+  const html = ids.length ? '<div class="pl-list">' + ids.map(id => { const p = S.places[id]; return '<button type="button" data-id="' + id + '"><span style="font-size:24px">📍</span><span><b>' + esc(p.name) + '</b><small>' + esc(p.u === S.uid ? 'você' : nameOf(p.u)) + ' · ' + esc(fmtFull(p.ts)) + '</small>' + (p.addr ? '<small>' + esc(p.addr) + '</small>' : '') + '</span></button>'; }).join('') + '</div>' : '<div class="empty" style="margin:20px 0">Nenhum date marcado ainda.<br>Toque no mapa para marcar o primeiro 💜</div>';
   const sh = openSheet('<h3>Nossos dates</h3><p class="sub">' + ids.length + (ids.length === 1 ? ' lugar marcado' : ' lugares marcados') + '</p>' + html);
-  sh.addEventListener('click', e => {
+  sh.addEventListener('click', async e => {
     const b = e.target.closest('[data-id]'); if (!b) return;
-    const p = S.places[b.dataset.id]; closeSheet();
-    if (p && S.map) { S.map.flyTo([p.lat, p.lng], 16, { duration: 1.2 }); setTimeout(() => S.markers[b.dataset.id] && S.markers[b.dataset.id].openPopup(), 1300); }
+    const p = S.places[b.dataset.id]; closeSheet(); if (!p) return;
+    await ensureMap(); if (!S.map) return;
+    S.map.flyTo([p.lat, p.lng], 16, { duration: 1.2 });
+    setTimeout(() => S.markers[b.dataset.id] && S.markers[b.dataset.id].openPopup(), 1300);
   });
 }
 
@@ -658,6 +763,7 @@ function readNote(id) {
 function settings() {
   const perm = ('Notification' in window) ? Notification.permission : 'denied';
   const sh = openSheet('<h3>Ajustes</h3><p class="sub">Só vocês dois veem tudo isso.</p>' +
+    '<div class="set-row"><div>Foto de perfil<small>Trocar a sua foto</small></div><button class="mini" data-a="photo" type="button">Abrir</button></div>' +
     '<div class="set-row"><div>Código do casal<small>' + esc(fmtCode(S.code)) + '</small></div><button class="mini" data-a="copy" type="button">Copiar</button></div>' +
     '<div class="set-row"><div>Seu nome<small>' + esc(S.name) + '</small></div><button class="mini" data-a="name" type="button">Alterar</button></div>' +
     '<div class="set-row"><div>Data de namoro<small>' + esc(S.since ? S.since.split('-').reverse().join('/') : 'não definida') + '</small></div><button class="mini" data-a="since" type="button">Alterar</button></div>' +
@@ -666,6 +772,7 @@ function settings() {
   sh.addEventListener('click', async e => {
     const b = e.target.closest('[data-a]'); if (!b) return; const a = b.dataset.a;
     if (a === 'copy') { try { await navigator.clipboard.writeText(fmtCode(S.code)); toast('Código copiado'); } catch (x) { toast(fmtCode(S.code)); } }
+    if (a === 'photo') { closeSheet(true); setTimeout(profileSheet, 30); }
     if (a === 'since') { closeSheet(true); setTimeout(editSince, 30); }
     if (a === 'notif') { try { await Notification.requestPermission(); } catch (x) {} closeSheet(); }
     if (a === 'name') {
@@ -748,6 +855,12 @@ function initUI() {
   /* abas */
   $$('#tabbar .tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
   $('#btnSettings').onclick = settings;
+  $('#chAvatar').onclick = profileSheet;
+  $('#avIn').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try { const d = await squareCompress(f, 256, 0.82); await R('members/' + S.uid + '/photo').set(d); closeSheet(); toast('Foto atualizada 💜'); }
+    catch (x) { toast('Não consegui usar essa foto'); }
+  };
 
   /* chat */
   const inp = $('#msgInput'); let typT = 0, lastTyp = 0;
@@ -815,12 +928,15 @@ function initUI() {
   /* mapa */
   $('#mapGo').onclick = searchPlaces;
   $('#mapQ').addEventListener('keydown', e => { if (e.key === 'Enter') searchPlaces(); });
-  $('#mapRes').addEventListener('click', e => {
+  $('#mapRes').addEventListener('click', async e => {
     const b = e.target.closest('[data-i]'); if (!b) return; const it = $('#mapRes')._res[+b.dataset.i]; if (!it) return;
-    closeMapRes(); ensureMap();
+    closeMapRes(); await ensureMap(); if (!S.map) return;
     const lat = +it.lat, lng = +it.lon; S.map.flyTo([lat, lng], 17, { duration: 1.2 });
-    setTimeout(() => pickPoint(lat, lng, it.name || it.display_name.split(',')[0], false), 900);
+    const parts = it.display_name.split(',');
+    const ad = (parts.length > 1 ? parts.slice(1, 4) : parts).join(',').trim();
+    setTimeout(() => pickPoint(lat, lng, it.name || parts[0], false, ad), 900);
   });
+  $('#mapMsg').addEventListener('click', e => { if (e.target.closest('#mapRetry')) ensureMap(); });
   $('#mapLocate').onclick = locateMe;
   $('#mapList').onclick = placesList;
   $('#map').addEventListener('click', e => {
