@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#050507">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Nós dois</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-screen="boot">
+<div id="app">
+
+  <!-- Ilha dinâmica -->
+  <div id="island" class="island" role="button" aria-label="Dias juntos">
+    <div class="isl-compact"><span class="isl-dot"></span><span id="islSmall">Nós dois</span></div>
+    <div class="isl-full">
+      <div class="isl-row">
+        <div>
+          <div class="isl-title">Juntos há</div>
+          <div class="isl-num"><b id="islNum">0</b><span id="islUnit">dias</span></div>
+        </div>
+        <div class="isl-heart">💜</div>
+      </div>
+      <div class="isl-det" id="islDet"></div>
+      <button class="isl-btn" id="islEdit" type="button">Alterar data</button>
+    </div>
+  </div>
+
+  <!-- Carregando -->
+  <section id="screen-boot" class="screen active">
+    <div class="logo"><span>💜</span></div>
+  </section>
+
+  <!-- Firebase não configurado -->
+  <section id="screen-setup" class="screen">
+    <div class="center-box">
+      <div class="logo small"><span>⚙️</span></div>
+      <h1>Falta um passo</h1>
+      <p class="sub">Para o chat funcionar ao vivo, abra o arquivo <b>firebase-config.js</b> e cole as chaves do seu projeto Firebase. O passo a passo está no <b>README.md</b>.</p>
+    </div>
+  </section>
+
+  <!-- Boas-vindas -->
+  <section id="screen-welcome" class="screen">
+    <div class="center-box">
+      <div class="logo"><span>💜</span></div>
+      <h1>Nós dois</h1>
+      <p class="sub">Um cantinho só nosso para conversar, guardar memórias e marcar nossos dates.</p>
+      <div class="stack">
+        <button class="btn primary" id="btnCreate" type="button">Criar nosso espaço</button>
+        <button class="btn ghost" id="btnJoin" type="button">Tenho um código</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Criar -->
+  <section id="screen-create" class="screen">
+    <button class="back" data-back type="button" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <div class="center-box">
+      <div id="cStep1" class="step show">
+        <h1>Qual é o seu nome?</h1>
+        <p class="sub">Vamos gerar um código para você enviar para a outra pessoa.</p>
+        <input class="field" id="cName" maxlength="24" placeholder="Seu nome" autocomplete="off">
+        <button class="btn primary" id="cGo" type="button">Gerar código</button>
+      </div>
+      <div id="cStep2" class="step">
+        <h1>Seu código</h1>
+        <p class="sub">Envie este código. Quando a pessoa digitar, você confirma aqui.</p>
+        <div class="code-box" id="cCode">------</div>
+        <div class="row">
+          <button class="btn ghost" id="cCopy" type="button">Copiar</button>
+          <button class="btn ghost" id="cShare" type="button">Enviar</button>
+        </div>
+        <div id="cReq" class="req-list"></div>
+        <div class="waiting"><i></i><i></i><i></i><span>Aguardando a outra pessoa</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Entrar -->
+  <section id="screen-join" class="screen">
+    <button class="back" data-back type="button" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <div class="center-box">
+      <div id="jStep1" class="step show">
+        <h1>Digite o código</h1>
+        <p class="sub">Coloque o mesmo código que a outra pessoa criou e o seu nome.</p>
+        <input class="field code-in" id="jCode" maxlength="7" placeholder="ABC-123" autocomplete="off" autocapitalize="characters">
+        <input class="field" id="jName" maxlength="24" placeholder="Seu nome" autocomplete="off">
+        <div class="err" id="jErr"></div>
+        <button class="btn primary" id="jGo" type="button">Pedir para entrar</button>
+      </div>
+      <div id="jStep2" class="step">
+        <h1>Quase lá</h1>
+        <p class="sub">Pedido enviado! Agora é só a outra pessoa confirmar no aparelho dela.</p>
+        <div class="waiting"><i></i><i></i><i></i><span>Aguardando confirmação</span></div>
+        <button class="btn ghost" id="jCancel" type="button">Cancelar</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- App principal -->
+  <section id="screen-main" class="screen">
+    <div class="pages" id="pages">
+
+      <!-- Conversa -->
+      <section class="page active" data-tab="chat">
+        <header class="head chat-head">
+          <div class="avatar" id="chAvatar">💜</div>
+          <div class="ch-info">
+            <div class="ch-name" id="chName">Conversa</div>
+            <div class="ch-sub" id="chSub"></div>
+          </div>
+          <button class="icon-btn" id="btnSettings" type="button" aria-label="Ajustes">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          </button>
+        </header>
+        <div class="msgs-scroll" id="msgsScroll"><div class="msgs" id="msgs"></div></div>
+        <button class="to-bottom" id="toBottom" type="button" aria-label="Ir para o fim"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><span id="toBottomN"></span></button>
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="pill">
+              <button class="icon-btn" id="btnEmoji" type="button" aria-label="Emojis"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9.5h.01M15 9.5h.01"/></svg></button>
+              <textarea id="msgInput" rows="1" placeholder="Mensagem" maxlength="2000"></textarea>
+              <button class="icon-btn" id="btnAttach" type="button" aria-label="Anexar foto"><svg viewBox="0 0 24 24"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7-7l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/></svg></button>
+            </div>
+            <button class="send-btn" id="btnSend" type="button" aria-label="Enviar">
+              <svg class="ic-cam" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>
+              <svg class="ic-send" viewBox="0 0 24 24"><path d="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z"/></svg>
+            </button>
+          </div>
+          <div class="emoji-panel" id="emojiPanel">
+            <div class="emoji-tabs" id="emojiTabs"></div>
+            <div class="emoji-grid" id="emojiGrid"></div>
+          </div>
+        </div>
+        <input type="file" id="fileIn" accept="image/*" hidden>
+        <input type="file" id="camIn" accept="image/*" capture="environment" hidden>
+      </section>
+
+      <!-- Status -->
+      <section class="page after" data-tab="status">
+        <header class="head"><h1>Status</h1><p>Como cada um está agora</p></header>
+        <div class="scroll">
+          <div class="mood-cards">
+            <div class="mood-card" id="moodThem"></div>
+            <div class="mood-card" id="moodMe"></div>
+          </div>
+          <h3 class="sec">Como você está se sentindo?</h3>
+          <div class="chips" id="moodGrid"></div>
+          <textarea class="field area" id="moodText" rows="2" maxlength="140" placeholder="Quer contar mais? (opcional)"></textarea>
+          <button class="btn primary" id="moodSave" type="button">Atualizar status</button>
+          <h3 class="sec">Últimos sentimentos</h3>
+          <div id="moodHist" class="hist"></div>
+        </div>
+      </section>
+
+      <!-- Mapa -->
+      <section class="page after" data-tab="map">
+        <div id="map"></div>
+        <div class="map-top">
+          <div class="search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input id="mapQ" placeholder="Buscar um lugar para o date" autocomplete="off">
+            <button id="mapGo" type="button">Buscar</button>
+          </div>
+          <div class="search-res" id="mapRes"></div>
+        </div>
+        <div class="map-fabs">
+          <button class="fab-s" id="mapLocate" type="button" aria-label="Minha localização"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+          <button class="fab-s" id="mapList" type="button" aria-label="Lista de dates"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></button>
+        </div>
+        <div class="map-hint" id="mapHint">Toque no mapa para marcar nosso date 💜</div>
+      </section>
+
+      <!-- Perguntas -->
+      <section class="page after" data-tab="quiz">
+        <header class="head"><h1>Perguntas</h1><p id="qProg">Para nos conhecermos melhor</p></header>
+        <div class="scroll">
+          <div class="cat-row" id="qCats"></div>
+          <div class="q-bar"><i id="qBar"></i></div>
+          <div class="q-stage" id="qStage"></div>
+          <div class="q-nav">
+            <button class="icon-btn round" id="qPrev" type="button" aria-label="Anterior"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <button class="btn ghost" id="qRand" type="button">🎲 Sortear</button>
+            <button class="icon-btn round" id="qNext" type="button" aria-label="Próxima"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bilhetes -->
+      <section class="page after" data-tab="notes">
+        <header class="head"><h1>Bilhetes</h1><p>Pequenos recados só nossos</p></header>
+        <div class="scroll"><div class="notes" id="notesGrid"></div><div class="empty" id="notesEmpty">Nenhum bilhete ainda.<br>Toque no + e deixe um recado 💌</div></div>
+        <button class="fab" id="noteAdd" type="button" aria-label="Novo bilhete"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      </section>
+    </div>
+
+    <nav id="tabbar" class="tabbar">
+      <div class="tab-ind" id="tabInd"></div>
+      <button class="tab on" data-tab="chat" type="button"><span class="ic"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.5 8.5 0 0 1-12.4 7.5L3 20.5l1.6-5.1A8.5 8.5 0 1 1 21 11.5z"/></svg><b class="dot" id="chatDot"></b></span><em>Conversa</em></button>
+      <button class="tab" data-tab="status" type="button"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9.5h.01M15 9.5h.01"/></svg></span><em>Status</em></button>
+      <button class="tab" data-tab="map" type="button"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></span><em>Mapa</em></button>
+      <button class="tab" data-tab="quiz" type="button"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.1 1-1.1 1.7"/><path d="M12 17h.01"/></svg></span><em>Perguntas</em></button>
+      <button class="tab" data-tab="notes" type="button"><span class="ic"><svg viewBox="0 0 24 24"><path d="M5 4h14a1 1 0 0 1 1 1v9l-6 6H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M14 20v-5a1 1 0 0 1 1-1h6"/></svg></span><em>Bilhetes</em></button>
+    </nav>
+  </section>
+
+  <div id="sheetLayer" class="sheet-layer"></div>
+  <div id="viewer" class="viewer"><img alt=""></div>
+  <div id="toast" class="toast"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
