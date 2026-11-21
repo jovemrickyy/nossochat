@@ -577,16 +577,8 @@ async function ensureMap() {
   S.mapBusy = false;
 }
 function addTiles(m) {
-  let errs = 0, swapped = false;
-  const dark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, attribution: '© OpenStreetMap · © CARTO' }).addTo(m);
-  dark.on('tileerror', () => {
-    if (swapped) return;
-    if (++errs >= 4) {
-      swapped = true; m.removeLayer(dark);
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
-      $('#map').classList.add('osm');
-    }
-  });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
+  $('#map').classList.add('osm');
 }
 function buildMap() {
   const m = L.map('map', { zoomControl: false, worldCopyJump: true }).setView([-14.2, -51.9], 4);
