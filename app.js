@@ -379,10 +379,40 @@ function updateSub() {
 function nearBottom() { const s = $('#msgsScroll'); return s.scrollHeight - s.scrollTop - s.clientHeight < 140; }
 function scrollBottom(smooth) { const s = $('#msgsScroll'); s.scrollTo({ top: s.scrollHeight, behavior: smooth ? 'smooth' : 'auto' }); }
 
+function replyKey(m) {
+  if (!m.r) return '';
+  const o = S.msgs[m.r.id];
+  return m.r.id + (o && o.d ? 'x' : '') + nameOf(m.r.u);
+}
+function quoteHtml(m) {
+  const r = m.r; if (!r) return '';
+  const o = S.msgs[r.id], gone = !!(o && o.d), mine = r.u === S.uid;
+  const body = gone ? 'Mensagem apagada' : (r.t || (r.i ? '📷 Foto' : ''));
+  return '<div class="quote' + (mine ? ' mine' : '') + (gone ? ' gone' : '') + '" data-q="' + esc(r.id) + '"><b>' + esc(mine ? 'Você' : nameOf(r.u)) + '</b><span>' + esc(body) + '</span></div>';
+}
+function startReply(id) {
+  const m = S.msgs[id]; if (!m || m.d) return;
+  S.reply = { id: id, u: m.u, t: (m.t || '').slice(0, 140), i: m.i ? 1 : 0 };
+  renderReplyBar(); $('#msgInput').focus();
+}
+function clearReply() { S.reply = null; renderReplyBar(); }
+function renderReplyBar() {
+  const b = $('#replyBar'); if (!b) return; const r = S.reply;
+  b.classList.toggle('open', !!r);
+  if (r) { $('#rpName').textContent = r.u === S.uid ? 'Você' : nameOf(r.u); $('#rpTxt').textContent = r.t || (r.i ? '📷 Foto' : ''); }
+}
+function jumpTo(id) {
+  const e = msgEls.get(id);
+  if (!e || !e.el.isConnected) return toast('Essa mensagem não está mais aqui');
+  e.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const b = $('.bubble', e.el); if (!b) return;
+  b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash');
+  setTimeout(() => b.classList.remove('flash'), 1700);
+}
 function buildMsg(m, isNew) {
   const partnerRead = S.partner ? (S.read[S.partner] || 0) : 0;
   const read = m.ts <= partnerRead;
-  const key = (m.d ? 'd' : '') + '|' + (m.t || '') + '|' + (m.i ? m.i.length : 0) + '|' + (read ? 'r' : 's') + '|' + m.ts;
+  const key = (m.d ? 'd' : '') + '|' + (m.t || '') + '|' + (m.i ? m.i.length : 0) + '|' + (read ? 'r' : 's') + '|' + m.ts + '|' + replyKey(m);
   let ent = msgEls.get(m.id);
   if (ent && ent.key === key) return ent.el;
   const mine = m.u === S.uid;
@@ -396,8 +426,8 @@ function buildMsg(m, isNew) {
   if (m.d) {
     html = '<div class="bubble"><div class="del"><svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>Mensagem apagada</div>' + meta + '</div>';
   } else {
-    const emo = m.t && !m.i && EMOJI_ONLY.test(m.t) && (m.t.match(/\p{Extended_Pictographic}/gu) || []).length <= 3;
-    html = '<div class="bubble' + (m.i ? ' has-pic' : '') + (emo ? ' emo' : '') + '">' +
+    const emo = m.t && !m.i && !m.r && EMOJI_ONLY.test(m.t) && (m.t.match(/\p{Extended_Pictographic}/gu) || []).length <= 3;
+    html = '<div class="bubble' + (m.i ? ' has-pic' : '') + (emo ? ' emo' : '') + '">' + quoteHtml(m) +
       (m.i ? '<div class="pic"><img src="' + m.i + '" alt="Foto"></div>' : '') +
       (m.t ? '<div class="txt' + (emo ? ' big' : '') + '">' + esc(m.t) + '</div>' : '') + meta + '</div>';
   }
@@ -452,6 +482,7 @@ function sendMessage(text, img) {
   text = (text || '').trim(); if (!text && !img) return;
   const ref = R('messages').push();
   const data = { u: S.uid, t: text, ts: now() }; if (img) data.i = img;
+  if (S.reply) { data.r = S.reply; clearReply(); }
   ref.set(data).catch(() => toast('Não foi possível enviar'));
   R('typing/' + S.uid).set(0);
   S.stick = true;
@@ -485,7 +516,7 @@ async function pickPhoto(file) {
 function msgMenu(id) {
   const m = S.msgs[id]; if (!m || m.d) return;
   const mine = m.u === S.uid;
-  const sh = openSheet('<div class="act-list">' +
+  const sh = openSheet('<div class="act-list"><button data-a="reply" type="button">Responder</button>' +
     (m.t ? '<button data-a="copy" type="button">Copiar texto</button>' : '') +
     (m.i ? '<button data-a="save" type="button">Salvar foto</button>' : '') +
     (mine ? '<button class="danger" data-a="del" type="button">Apagar para todos</button>' : '') +
@@ -493,9 +524,10 @@ function msgMenu(id) {
   sh.addEventListener('click', async e => {
     const a = e.target.closest('button'); if (!a) return;
     const act = a.dataset.a;
+    if (act === 'reply') startReply(id);
     if (act === 'copy') { try { await navigator.clipboard.writeText(m.t); toast('Copiado'); } catch (x) { toast('Não foi possível copiar'); } }
     if (act === 'save') { const l = document.createElement('a'); l.href = m.i; l.download = 'foto-' + m.id + '.jpg'; document.body.appendChild(l); l.click(); l.remove(); }
-    if (act === 'del') { R('messages/' + id).update({ d: true, t: null, i: null }).catch(() => toast('Não foi possível apagar')); }
+    if (act === 'del') { R('messages/' + id).update({ d: true, t: null, i: null, r: null }).catch(() => toast('Não foi possível apagar')); }
     closeSheet();
   });
 }
@@ -784,7 +816,7 @@ function leave() {
   try { R('presence/' + S.uid).set({ on: false, ts: now() }); } catch (e) {}
   clearRefs(); forget(); S.members = {}; S.partner = null; S.msgs = {}; msgEls.clear(); sepEls.clear(); $('#msgs').innerHTML = '';
   S.places = {}; S.notes = {}; S.answers = {}; S.since = null; if (S.layerG) S.layerG.clearLayers();
-  document.body.classList.remove('hide-tabs'); go('welcome');
+  S.reply = null; renderReplyBar(); document.body.classList.remove('hide-tabs'); go('welcome');
 }
 
 /* ================= eventos ================= */
@@ -888,18 +920,57 @@ function initUI() {
   $('#toBottom').onclick = () => { scrollBottom(true); S.unread = 0; updateBadge(); };
   sc.addEventListener('click', () => { if (S.emojiOpen) toggleEmoji(false); });
 
-  /* mensagens: toque, foto e segurar */
-  const msgs = $('#msgs'); let lp = null, sx = 0, sy = 0, fired = false;
-  msgs.addEventListener('click', e => { const im = e.target.closest('.pic img'); if (im && !fired) openViewer(im.src); fired = false; });
+  /* mensagens: toque, foto, segurar e deslizar para responder */
+  const msgs = $('#msgs'); let lp = null, sx = 0, sy = 0, fired = false, sw = null;
+  const THRESH = 52;
+  msgs.addEventListener('click', e => {
+    if (fired) { fired = false; return; }
+    const q = e.target.closest('.quote'); if (q) { jumpTo(q.dataset.q); return; }
+    const im = e.target.closest('.pic img'); if (im) openViewer(im.src);
+  });
   msgs.addEventListener('pointerdown', e => {
     const b = e.target.closest('.bubble'); if (!b) return;
     sx = e.clientX; sy = e.clientY; fired = false; b.classList.add('press');
-    lp = setTimeout(() => { fired = true; b.classList.remove('press'); if (navigator.vibrate) navigator.vibrate(15); msgMenu(b.closest('.msg').dataset.id); }, 430);
+    sw = { el: b.closest('.msg'), on: false, done: false };
+    lp = setTimeout(() => {
+      if (sw && sw.on) return;
+      fired = true; b.classList.remove('press'); sw = null;
+      if (navigator.vibrate) navigator.vibrate(15);
+      msgMenu(b.closest('.msg').dataset.id);
+    }, 430);
   });
   const cancelLp = () => { clearTimeout(lp); $$('.bubble.press').forEach(x => x.classList.remove('press')); };
-  msgs.addEventListener('pointermove', e => { if (Math.abs(e.clientX - sx) > 9 || Math.abs(e.clientY - sy) > 9) cancelLp(); });
-  msgs.addEventListener('pointerup', cancelLp); msgs.addEventListener('pointercancel', cancelLp); msgs.addEventListener('pointerleave', cancelLp);
-  msgs.addEventListener('contextmenu', e => { const b = e.target.closest('.bubble'); if (!b) return; e.preventDefault(); if (!fired) { fired = true; cancelLp(); msgMenu(b.closest('.msg').dataset.id); } });
+  const endSwipe = () => {
+    if (!sw) return;
+    const el = sw.el, hit = sw.on && sw.done, was = sw.on; sw = null;
+    el.classList.remove('swiping', 'armed', 'swl'); el.style.transform = ''; el.style.removeProperty('--sw');
+    if (was) fired = true;
+    if (hit) startReply(el.dataset.id);
+  };
+  const abortSwipe = () => { if (sw) sw.done = false; endSwipe(); };
+  msgs.addEventListener('pointermove', e => {
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if (sw && !sw.on && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      sw.on = true; sw.dir = dx > 0 ? 1 : -1; cancelLp();
+      sw.el.classList.add('swiping'); sw.el.classList.toggle('swl', sw.dir < 0);
+    }
+    if (sw && sw.on) {
+      const d = Math.max(0, dx * sw.dir);
+      const x = Math.min(d < THRESH ? d : THRESH + (d - THRESH) * 0.25, 92);
+      sw.el.style.transform = 'translateX(' + (x * sw.dir) + 'px)';
+      sw.el.style.setProperty('--sw', Math.min(1, x / THRESH));
+      const done = d >= THRESH;
+      if (done && !sw.done && navigator.vibrate) navigator.vibrate(12);
+      sw.done = done; sw.el.classList.toggle('armed', done);
+      return;
+    }
+    if (Math.abs(dx) > 9 || Math.abs(dy) > 9) cancelLp();
+  });
+  msgs.addEventListener('pointerup', () => { cancelLp(); endSwipe(); });
+  msgs.addEventListener('pointercancel', () => { cancelLp(); abortSwipe(); });
+  msgs.addEventListener('pointerleave', () => { cancelLp(); abortSwipe(); });
+  msgs.addEventListener('contextmenu', e => { const b = e.target.closest('.bubble'); if (!b) return; e.preventDefault(); if (!fired) { fired = true; cancelLp(); sw = null; msgMenu(b.closest('.msg').dataset.id); } });
+  $('#rpClose').onclick = clearReply;
   $('#viewer').onclick = () => $('#viewer').classList.remove('show');
 
   /* status */
