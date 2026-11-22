@@ -387,19 +387,19 @@ function replyKey(m) {
 function quoteHtml(m) {
   const r = m.r; if (!r) return '';
   const o = S.msgs[r.id], gone = !!(o && o.d), mine = r.u === S.uid;
-  const body = gone ? 'Mensagem apagada' : (r.t || (r.i ? '📷 Foto' : ''));
+  const body = gone ? 'Mensagem apagada' : (r.t || (r.i ? '📷 Foto' : (r.a ? '🎤 Mensagem de voz' : '')));
   return '<div class="quote' + (mine ? ' mine' : '') + (gone ? ' gone' : '') + '" data-q="' + esc(r.id) + '"><b>' + esc(mine ? 'Você' : nameOf(r.u)) + '</b><span>' + esc(body) + '</span></div>';
 }
 function startReply(id) {
   const m = S.msgs[id]; if (!m || m.d) return;
-  S.reply = { id: id, u: m.u, t: (m.t || '').slice(0, 140), i: m.i ? 1 : 0 };
+  S.reply = { id: id, u: m.u, t: (m.t || '').slice(0, 140), i: m.i ? 1 : 0, a: m.a ? 1 : 0 };
   renderReplyBar(); $('#msgInput').focus();
 }
 function clearReply() { S.reply = null; renderReplyBar(); }
 function renderReplyBar() {
   const b = $('#replyBar'); if (!b) return; const r = S.reply;
   b.classList.toggle('open', !!r);
-  if (r) { $('#rpName').textContent = r.u === S.uid ? 'Você' : nameOf(r.u); $('#rpTxt').textContent = r.t || (r.i ? '📷 Foto' : ''); }
+  if (r) { $('#rpName').textContent = r.u === S.uid ? 'Você' : nameOf(r.u); $('#rpTxt').textContent = r.t || (r.i ? '📷 Foto' : (r.a ? '🎤 Mensagem de voz' : '')); }
 }
 function jumpTo(id) {
   const e = msgEls.get(id);
@@ -412,7 +412,7 @@ function jumpTo(id) {
 function buildMsg(m, isNew) {
   const partnerRead = S.partner ? (S.read[S.partner] || 0) : 0;
   const read = m.ts <= partnerRead;
-  const key = (m.d ? 'd' : '') + '|' + (m.t || '') + '|' + (m.i ? m.i.length : 0) + '|' + (read ? 'r' : 's') + '|' + m.ts + '|' + replyKey(m);
+  const key = (m.d ? 'd' : '') + '|' + (m.t || '') + '|' + (m.i ? m.i.length : 0) + '|' + (m.a ? m.a.length : 0) + '|' + (read ? 'r' : 's') + '|' + m.ts + '|' + replyKey(m);
   let ent = msgEls.get(m.id);
   if (ent && ent.key === key) return ent.el;
   const mine = m.u === S.uid;
@@ -427,11 +427,13 @@ function buildMsg(m, isNew) {
     html = '<div class="bubble"><div class="del"><svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>Mensagem apagada</div>' + meta + '</div>';
   } else {
     const emo = m.t && !m.i && !m.r && EMOJI_ONLY.test(m.t) && (m.t.match(/\p{Extended_Pictographic}/gu) || []).length <= 3;
-    html = '<div class="bubble' + (m.i ? ' has-pic' : '') + (emo ? ' emo' : '') + '">' + quoteHtml(m) +
+    html = '<div class="bubble' + (m.i ? ' has-pic' : '') + (m.a ? ' has-aud' : '') + (emo ? ' emo' : '') + '">' + quoteHtml(m) +
+      (m.a ? audioHtml(m) : '') +
       (m.i ? '<div class="pic"><img src="' + m.i + '" alt="Foto"></div>' : '') +
       (m.t ? '<div class="txt' + (emo ? ' big' : '') + '">' + esc(m.t) + '</div>' : '') + meta + '</div>';
   }
   el.innerHTML = html;
+  if (m.a && !m.d) paintVm(el);
   const img = $('img', el); if (img) img.addEventListener('load', () => { if (S.stick) scrollBottom(false); });
   msgEls.set(m.id, { el, key });
   return el;
@@ -462,7 +464,7 @@ function renderMessages() {
 function incoming(m) {
   if (S.tab !== 'chat') { S.unread++; updateBadge(); }
   else if (!nearBottom()) { S.unread++; updateBadge(); }
-  if (document.hidden) notify(nameOf(m.u), m.d ? 'Mensagem' : (m.i && !m.t ? '📷 Foto' : m.t));
+  if (document.hidden) notify(nameOf(m.u), m.d ? 'Mensagem' : (m.a ? '🎤 Mensagem de voz' : (m.i && !m.t ? '📷 Foto' : m.t)));
   else if (navigator.vibrate) navigator.vibrate(12);
 }
 function markRead() {
@@ -478,16 +480,124 @@ async function notify(title, body) {
   } catch (e) {}
 }
 
-function sendMessage(text, img) {
-  text = (text || '').trim(); if (!text && !img) return;
+
+/* ================= mensagens de voz ================= */
+const MAXREC = 90;
+const AUD = { el: null, id: null, speed: 1 };
+const REC = { mr: null, stream: null, chunks: [], t0: 0, timer: 0, cancel: false, mime: '' };
+function fmtDur(s) { s = Math.max(0, Math.round(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function barsFor(id) {
+  let h = hash(id) || 7, out = '';
+  for (let i = 0; i < 32; i++) {
+    h = (h * 1103515245 + 12345) & 0x7fffffff;
+    const v = h / 0x7fffffff, ht = Math.round(24 + (v * 0.7 + 0.3 * Math.abs(Math.sin(i * 0.8))) * 76);
+    out += '<i style="height:' + ht + '%"></i>';
+  }
+  return out;
+}
+function audioHtml(m) {
+  return '<div class="vm" data-id="' + esc(m.id) + '"><button class="vm-play" type="button" aria-label="Reproduzir"><svg class="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><svg class="i-pause" viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg></button><div class="vm-mid"><div class="vm-bars">' + barsFor(m.id) + '</div><div class="vm-time">' + fmtDur(m.ad) + '</div></div><button class="vm-spd" type="button">' + AUD.speed + 'x</button></div>';
+}
+function paintVm(el) {
+  const vm = $('.vm', el); if (!vm) return;
+  const id = vm.dataset.id, m = S.msgs[id], act = AUD.id === id && AUD.el;
+  const tot = (m && m.ad) || 0, cur = act ? AUD.el.currentTime : 0, p = tot ? Math.min(1, cur / tot) : 0;
+  vm.classList.toggle('active', !!act); vm.classList.toggle('playing', !!act && !AUD.el.paused);
+  const bars = $$('.vm-bars i', vm), n = Math.round(p * bars.length);
+  bars.forEach((b, i) => b.classList.toggle('on', i < n));
+  $('.vm-time', vm).textContent = fmtDur(act ? cur : tot);
+  $('.vm-spd', vm).textContent = AUD.speed + 'x';
+}
+function paintById(id) { const e = id && msgEls.get(id); if (e) paintVm(e.el); }
+function stopAudio() {
+  const old = AUD.id, a = AUD.el; AUD.el = null; AUD.id = null;
+  if (a) { try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) {} }
+  paintById(old);
+}
+function toggleAudio(id) {
+  const m = S.msgs[id]; if (!m || !m.a) return;
+  if (AUD.id === id && AUD.el) { if (AUD.el.paused) AUD.el.play().catch(() => toast('Não foi possível reproduzir')); else AUD.el.pause(); return; }
+  stopAudio();
+  const a = new Audio(m.a); a.preload = 'auto'; a.playbackRate = AUD.speed;
+  AUD.el = a; AUD.id = id;
+  const paint = () => paintById(id);
+  a.addEventListener('timeupdate', paint); a.addEventListener('play', paint); a.addEventListener('pause', paint);
+  a.addEventListener('ended', () => { if (AUD.el === a) stopAudio(); });
+  a.play().catch(() => { toast('Não foi possível reproduzir'); if (AUD.el === a) stopAudio(); });
+  paint();
+}
+function seekAudio(id, ratio) {
+  const m = S.msgs[id]; if (!m || !m.a) return;
+  if (!(AUD.id === id && AUD.el)) toggleAudio(id);
+  const tot = m.ad || 0; if (!AUD.el || !tot) return;
+  try { AUD.el.currentTime = Math.max(0, Math.min(1, ratio)) * tot; } catch (e) {}
+  paintById(id);
+}
+function cycleSpeed() {
+  AUD.speed = AUD.speed === 1 ? 1.5 : (AUD.speed === 1.5 ? 2 : 1);
+  if (AUD.el) AUD.el.playbackRate = AUD.speed;
+  paintById(AUD.id);
+}
+function pickMime() {
+  if (!window.MediaRecorder) return null;
+  const c = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'];
+  for (let i = 0; i < c.length; i++) { try { if (MediaRecorder.isTypeSupported(c[i])) return c[i]; } catch (e) {} }
+  return '';
+}
+function blobToDataURL(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); }); }
+async function startRec() {
+  if (REC.mr || REC.busy) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) return toast('Este navegador não grava áudio');
+  REC.busy = true;
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+  catch (e) { REC.busy = false; return toast('Permita o microfone para gravar'); }
+  const mime = pickMime(); let mr;
+  try { mr = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 20000 } : { audioBitsPerSecond: 20000 }); }
+  catch (e) { try { mr = new MediaRecorder(stream); } catch (x) { stream.getTracks().forEach(t => t.stop()); REC.busy = false; return toast('Não consegui gravar'); } }
+  stopAudio();
+  REC.mr = mr; REC.stream = stream; REC.chunks = []; REC.cancel = false; REC.t0 = Date.now(); REC.mime = mr.mimeType || mime || 'audio/webm'; REC.busy = false;
+  mr.ondataavailable = e => { if (e.data && e.data.size) REC.chunks.push(e.data); };
+  mr.onstop = finishRec;
+  mr.start(250);
+  $('#recTime').textContent = '0:00'; $('.composer-wrap').classList.add('recording');
+  clearInterval(REC.timer); REC.timer = setInterval(() => {
+    const s = (Date.now() - REC.t0) / 1000; $('#recTime').textContent = fmtDur(s);
+    if (s >= MAXREC) { toast('Limite de ' + MAXREC + ' segundos'); stopRec(false); }
+  }, 200);
+  if (navigator.vibrate) navigator.vibrate(18);
+}
+function stopRec(cancel) {
+  if (!REC.mr) return;
+  REC.cancel = !!cancel; clearInterval(REC.timer);
+  try { if (REC.mr.state !== 'inactive') REC.mr.stop(); else finishRec(); } catch (e) { finishRec(); }
+}
+async function finishRec() {
+  const dur = (Date.now() - REC.t0) / 1000, cancel = REC.cancel, chunks = REC.chunks, mime = (REC.mime || 'audio/webm').split(';')[0];
+  clearInterval(REC.timer);
+  if (REC.stream) REC.stream.getTracks().forEach(t => t.stop());
+  REC.mr = null; REC.stream = null; REC.chunks = [];
+  $('.composer-wrap').classList.remove('recording');
+  if (cancel) return;
+  if (dur < 0.8 || !chunks.length) return toast('Áudio muito curto');
+  try {
+    const data = await blobToDataURL(new Blob(chunks, { type: mime }));
+    if (data.length > 1400000) return toast('Áudio grande demais');
+    sendMessage('', null, { a: data, ad: Math.max(1, Math.round(dur)) });
+  } catch (e) { toast('Não foi possível enviar o áudio'); }
+}
+
+function sendMessage(text, img, aud) {
+  text = (text || '').trim(); if (!text && !img && !aud) return;
   const ref = R('messages').push();
   const data = { u: S.uid, t: text, ts: now() }; if (img) data.i = img;
+  if (aud) { data.a = aud.a; data.ad = aud.ad; }
   if (S.reply) { data.r = S.reply; clearReply(); }
   ref.set(data).catch(() => toast('Não foi possível enviar'));
   R('typing/' + S.uid).set(0);
   S.stick = true;
 }
-function autosize() { const t = $('#msgInput'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 120) + 'px'; $('#btnSend').classList.toggle('has', t.value.trim().length > 0); }
+function autosize() { const t = $('#msgInput'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 120) + 'px'; $('#btnSend').classList.toggle('has', t.value.trim().length > 0); $('.pill').classList.toggle('has-text', t.value.length > 0); }
 
 function compress(file, max, q) {
   return new Promise((res, rej) => {
@@ -527,7 +637,7 @@ function msgMenu(id) {
     if (act === 'reply') startReply(id);
     if (act === 'copy') { try { await navigator.clipboard.writeText(m.t); toast('Copiado'); } catch (x) { toast('Não foi possível copiar'); } }
     if (act === 'save') { const l = document.createElement('a'); l.href = m.i; l.download = 'foto-' + m.id + '.jpg'; document.body.appendChild(l); l.click(); l.remove(); }
-    if (act === 'del') { R('messages/' + id).update({ d: true, t: null, i: null, r: null }).catch(() => toast('Não foi possível apagar')); }
+    if (act === 'del') { R('messages/' + id).update({ d: true, t: null, i: null, a: null, ad: null, r: null }).catch(() => toast('Não foi possível apagar')); }
     closeSheet();
   });
 }
@@ -816,7 +926,7 @@ function leave() {
   try { R('presence/' + S.uid).set({ on: false, ts: now() }); } catch (e) {}
   clearRefs(); forget(); S.members = {}; S.partner = null; S.msgs = {}; msgEls.clear(); sepEls.clear(); $('#msgs').innerHTML = '';
   S.places = {}; S.notes = {}; S.answers = {}; S.since = null; if (S.layerG) S.layerG.clearLayers();
-  S.reply = null; renderReplyBar(); document.body.classList.remove('hide-tabs'); go('welcome');
+  stopAudio(); if (REC.mr) stopRec(true); S.reply = null; renderReplyBar(); document.body.classList.remove('hide-tabs'); go('welcome');
 }
 
 /* ================= eventos ================= */
@@ -900,11 +1010,14 @@ function initUI() {
   });
   $('#btnSend').onclick = () => {
     const v = inp.value.trim();
-    if (!v) { $('#camIn').click(); return; }
+    if (!v) { startRec(); return; }
     sendMessage(v); inp.value = ''; autosize();
     if (!S.emojiOpen) inp.focus();
   };
   $('#btnAttach').onclick = () => $('#fileIn').click();
+  $('#btnCam').onclick = () => $('#camIn').click();
+  $('#recCancel').onclick = () => stopRec(true);
+  $('#recSend').onclick = () => stopRec(false);
   $('#fileIn').onchange = e => { pickPhoto(e.target.files[0]); e.target.value = ''; };
   $('#camIn').onchange = e => { pickPhoto(e.target.files[0]); e.target.value = ''; };
   $('#btnEmoji').onclick = () => toggleEmoji(!S.emojiOpen);
@@ -925,6 +1038,9 @@ function initUI() {
   const THRESH = 52;
   msgs.addEventListener('click', e => {
     if (fired) { fired = false; return; }
+    const vp = e.target.closest('.vm-play'); if (vp) { toggleAudio(vp.closest('.vm').dataset.id); return; }
+    const vs = e.target.closest('.vm-spd'); if (vs) { cycleSpeed(); return; }
+    const vb = e.target.closest('.vm-bars'); if (vb) { const r = vb.getBoundingClientRect(); seekAudio(vb.closest('.vm').dataset.id, (e.clientX - r.left) / r.width); return; }
     const q = e.target.closest('.quote'); if (q) { jumpTo(q.dataset.q); return; }
     const im = e.target.closest('.pic img'); if (im) openViewer(im.src);
   });
@@ -1034,6 +1150,7 @@ function initUI() {
   /* visibilidade */
   document.addEventListener('visibilitychange', () => {
     if (!S.code || !S.db || document.body.dataset.screen !== 'main') return;
+    if (document.hidden && REC.mr) { stopRec(true); toast('Gravação cancelada'); }
     R('presence/' + S.uid).set({ on: !document.hidden, ts: now() });
     if (!document.hidden) markRead();
   });
